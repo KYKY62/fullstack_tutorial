@@ -7,6 +7,13 @@ import 'package:rizky_frontend/data/model/faktur_model.dart';
 import 'package:http/http.dart' as http;
 
 class HomeController extends GetxController {
+  @override
+  void onInit() {
+    super.onInit();
+    print('OnInit berhasil');
+    getFaktur();
+  }
+
   final TextEditingController searchController = TextEditingController();
   final TextEditingController kodeController = TextEditingController();
   final TextEditingController descController = TextEditingController();
@@ -15,6 +22,9 @@ class HomeController extends GetxController {
   var getAllFakturOrFilter = Rx<Future<List<FakturModel>>?>(null);
   final FocusNode focusNode =
       FocusNode(); // untuk menghilangkan cursor saat keyboard ditutup
+  var fakturList = <FakturModel>[].obs;
+  var fakturFilterList = <FakturModel>[].obs;
+  var isLoading = false.obs;
 
   void clearController() {
     kodeController.clear();
@@ -23,51 +33,49 @@ class HomeController extends GetxController {
     stockController.clear();
   }
 
-  Future<List<FakturModel>> getFaktur() async {
+  Future<void> getFaktur() async {
+    isLoading.value = true;
     try {
       Uri url = Uri.parse('${ApiFaktur.baseUrl}/get.php');
       final response = await http.get(url);
       if (response.statusCode == 200) {
         List getFakturs = json.decode(response.body)['data'];
-        return getFakturs.map((data) => FakturModel.fromJson(data)).toList();
+        // mengisi ke Rx fakturList
+        fakturList.value =
+            getFakturs.map((data) => FakturModel.fromJson(data)).toList();
       } else {
         throw Exception();
       }
     } catch (_) {
-      return [];
+      fakturList.clear();
+      fakturFilterList.clear();
+    } finally {
+      isLoading.value = false;
     }
   }
 
-  Future<List<FakturModel>> filterKode() async {
-    try {
-      Uri url = Uri.parse(
-          '${ApiFaktur.baseUrl}/get.php?kode=${searchController.text}');
-      final response = await http.get(url);
-      List getFakturs = json.decode(response.body);
-      //  karna return filter kode salah nya maka dibuat if agar dapat
-      // menampilkan pesan data kosong dan return balik ke getFaktur
-      if (response.statusCode == 200 && getFakturs[0]['success'] == true) {
-        return getFakturs.map((data) => FakturModel.fromJson(data)).toList();
-      } else {
-        Get.snackbar(
-          'Kode Gagal Dicari',
-          'Kode Tidak Ada',
-          snackPosition: SnackPosition.BOTTOM,
-          duration: const Duration(seconds: 2),
-          backgroundColor: Colors.red,
-          colorText: Colors.white,
-          borderRadius: 8,
-          margin: const EdgeInsets.all(10),
-        );
+  void searchByKode(String kode) {
+    if (kode.isEmpty) {
+      // Jika input kosong, kosongkan filter
+      fakturFilterList.value = [];
+    }
 
-        return getFaktur();
-      }
-    } catch (_) {
-      return [];
+    // Filter data berdasarkan kode
+    final hasilPencarian = fakturList
+        .where(
+          (faktur) => faktur.kode!.toLowerCase() == kode.toLowerCase(),
+        )
+        .toList();
+
+    if (hasilPencarian.isNotEmpty) {
+      // Ambil hanya data pertama
+      fakturFilterList.value = [hasilPencarian.first];
+    } else {
+      // kosongkan fakturfilterList
+      fakturFilterList.value = [];
+      Get.snackbar("Pencarian", "Kode tidak ditemukan");
     }
   }
-
-  void searchByKode() => getAllFakturOrFilter.value = filterKode();
 
   void editFaktur() async {
     try {
@@ -83,7 +91,20 @@ class HomeController extends GetxController {
         headers: {'Content-Type': 'application/json'},
         body: fakturModel.toRawJson(),
       );
+
+      // mencari index fakturList
+      final index = fakturList.indexWhere(
+        (faktur) =>
+            faktur.kode!.toLowerCase() == kodeController.text.toLowerCase(),
+      );
+
+      if (index == -1) {
+        throw Exception();
+      }
+
       if (response.statusCode == 200) {
+        // perbarui fakturList sesuai index dengan data fakturModel
+        fakturList[index] = fakturModel;
         clearController();
         Get.back();
       } else {
@@ -104,7 +125,10 @@ class HomeController extends GetxController {
       );
 
       if (response.statusCode == 200) {
-        print(response.body);
+        // menghapus isi dari fakturList berdasarkan kode
+        fakturList.removeWhere(
+          (faktur) => faktur.kode!.toLowerCase() == kode.toLowerCase(),
+        );
         Get.snackbar(
           'Informasi',
           'Faktur Telah Dihapus',
@@ -136,6 +160,7 @@ class HomeController extends GetxController {
       if (response.statusCode == 200) {
         Get.back();
         clearController();
+        fakturList.add(fakturModel);
         Get.snackbar(
           'Informasi',
           'Faktur Telah Dibuat',
